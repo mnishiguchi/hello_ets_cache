@@ -3,32 +3,45 @@ defmodule HelloEtsCache do
 
   require Ex2ms
 
+  # キャッシュストアのインスタンスを生成する
   def start_link(opts) do
     server_name = Keyword.fetch!(opts, :name)
     GenServer.start_link(__MODULE__, opts, name: server_name)
   end
 
-  def get(cache_name, key, default \\ nil) do
-    GenServer.call(cache_name, {:get, key, default})
-  end
-
-  def put(cache_name, key, value) do
-    GenServer.cast(cache_name, {:put, key, value})
-  end
-
-  def delete_all(cache_name) do
-    GenServer.cast(cache_name, :delete_all)
-  end
-
+  # キャッシュストアを削除する
+  @spec stop(atom | pid | {atom, any} | {:via, atom, any}) :: :ok
   def stop(cache_name) do
     GenServer.stop(cache_name)
   end
 
+  # キャッシュストアから有効な値を取得
+  def get(cache_name, key, default \\ nil) do
+    GenServer.call(cache_name, {:get, key, default})
+  end
+
+  # キャッシュストアから全ての有効な値を取得
+  @spec get_all(atom | pid | {atom, any} | {:via, atom, any}) :: any
+  def get_all(cache_name) do
+    GenServer.call(cache_name, :get_all)
+  end
+
+  # キャッシュストアに値を挿入
+  def put(cache_name, key, value) do
+    GenServer.cast(cache_name, {:put, key, value})
+  end
+
+  # キャッシュストアから全ての値を削除
+  def delete_all(cache_name) do
+    GenServer.cast(cache_name, :delete_all)
+  end
+
+  # キャッシュストア内部のリストを取得
   def entries(cache_name) do
     :ets.select(
       cache_name,
       Ex2ms.fun do
-        {k, v, _ttl} -> {k, v}
+        {k, v, ttl} -> {k, v, ttl}
       end
     )
   end
@@ -49,6 +62,7 @@ defmodule HelloEtsCache do
       cleanup_interval: cleanup_interval
     }
 
+    # すぐ呼び出し元にプロセスIDを返し、handle_continueで非同期に他の処理をする
     {:ok, state, {:continue, :after_init}}
   end
 
@@ -83,6 +97,13 @@ defmodule HelloEtsCache do
   end
 
   @impl true
+  def handle_call(:get_all, _from, state) do
+    reply = do_get_all(state)
+
+    {:reply, reply, state}
+  end
+
+  @impl true
   def handle_cast({:put, key, value}, state) do
     inserted_at_ms = System.monotonic_time(:millisecond)
 
@@ -101,8 +122,10 @@ defmodule HelloEtsCache do
 
   @impl true
   def handle_info(:delete_expired, state) do
+    # 次回のキャッシュのクリアのタイマーをセット
     Process.send_after(self(), :delete_expired, state.cleanup_interval)
 
+    # 今キャッシュのクリアを実施
     do_delete_expired(state)
 
     {:noreply, state}
@@ -110,8 +133,22 @@ defmodule HelloEtsCache do
 
   @impl true
   def terminate(reason, state) do
+    # GenServerが停止したら、紐づいているETSインスタンスも削除する方針
     :ets.delete(state.cache_name)
     reason
+  end
+
+  defp do_get_all(%{cache_name: cache_name, cache_ttl: cache_ttl}) do
+    time_now_ms = System.monotonic_time(:millisecond)
+
+    :ets.select(
+      cache_name,
+      Ex2ms.fun do
+        {key, value, inserted_at_ms}
+        when is_integer(^cache_ttl) and inserted_at_ms + ^cache_ttl >= ^time_now_ms ->
+          {key, value}
+      end
+    )
   end
 
   defp do_delete_expired(%{cache_name: cache_name, cache_ttl: cache_ttl}) do

@@ -53,18 +53,14 @@ defmodule HelloEtsCacheTest do
     HelloEtsCache.put(:test_ets, :c, 3)
 
     # The records are accessible before expired
-    assert HelloEtsCache.get(:test_ets, :a) == 1
-    assert HelloEtsCache.get(:test_ets, :b) == 2
-    assert HelloEtsCache.get(:test_ets, :c) == 3
-    assert [{:c, 3}, {:b, 2}, {:a, 1}] == HelloEtsCache.entries(:test_ets)
+    assert [{:c, 3}, {:b, 2}, {:a, 1}] = HelloEtsCache.get_all(:test_ets)
+    assert [{:c, 3, _}, {:b, 2, _}, {:a, 1, _}] = HelloEtsCache.entries(:test_ets)
 
     Process.sleep(3)
 
     # The records are not accessible after expired
-    assert HelloEtsCache.get(:test_ets, :a) |> is_nil()
-    assert HelloEtsCache.get(:test_ets, :b) |> is_nil()
-    assert HelloEtsCache.get(:test_ets, :c) |> is_nil()
-    assert [{:c, 3}, {:b, 2}, {:a, 1}] == HelloEtsCache.entries(:test_ets)
+    assert [] = HelloEtsCache.get_all(:test_ets)
+    assert [{:c, 3, _}, {:b, 2, _}, {:a, 1, _}] = HelloEtsCache.entries(:test_ets)
 
     Process.sleep(500)
 
